@@ -1,10 +1,14 @@
 import dataclasses
+import os
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
 import einops
 import numpy as np
 
 from openpi import transforms
 from openpi.models import model as _model
+
+
 
 
 def make_droid_example() -> dict:
@@ -79,3 +83,4 @@ class DroidOutputs(transforms.DataTransformFn):
     def __call__(self, data: dict) -> dict:
         # Only return the first 8 dims.
         return {"actions": np.asarray(data["actions"][:, :8])}
+

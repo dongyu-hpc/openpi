@@ -239,6 +239,60 @@ def _extract_observation(args: Args, obs_dict, *, save_to_disk=False):
         "joint_position": joint_position,
         "gripper_position": gripper_position,
     }
+    
+import threading
+import numpy as np
+
+class RTCController:
+    """每个控制周期调用一次 step(),返回要执行的 (8,) 动作。"""
+
+    def __init__(self, policy_client, make_request, horizon=15, s=8, d_init=6):
+        self.client, self.make_request = policy_client, make_request
+        self.H, self.s, self.d = horizon, s, d_init
+        self.chunk = self.raw = None   # (H, 8) 与 (H, action_dim)
+        self.i = 0                     # 下一个要执行的下标
+        self.k = 0                     # 触发推理后已执行的步数
+        self.thread = self.result = None
+
+    def _run(self, req):
+        self.result = self.client.infer(req)
+
+    def _load(self, out, k):
+        self.chunk = np.asarray(out["actions"])
+        self.raw = np.asarray(out["model_actions"])
+        assert self.chunk.shape[0] == self.H
+        self.i = k
+
+    def step(self):
+        if self.chunk is None:                              # 第一个块同步获取,没有引导
+            self._load(self.client.infer(self.make_request()), 0)
+        elif self.thread is None and self.i >= self.s:      # 执行满 s 步,后台触发下一次推理
+            left = self.raw[self.i:]
+            req = self.make_request()
+            req["rtc_prev_chunk"] = np.pad(left, ((0, self.H - len(left)), (0, 0)))
+            req["rtc_d"] = np.int32(self.d)
+            req["rtc_leftover"] = np.int32(len(left))
+            self.k, self.result = 0, None
+            self.thread = threading.Thread(target=self._run, args=(req,), daemon=True)
+            self.thread.start()
+
+        if self.thread is not None and not self.thread.is_alive():   # 新块到达
+            self.thread = None
+            if self.result is None:
+                raise RuntimeError("后台推理失败")
+            self._load(self.result, self.k)    # 跳过推理期间已执行的 k 步
+            self.d = max(1, self.k)            # 用实测延迟更新 d,实际可以再做平滑
+
+        if self.i >= self.H:                   # 旧块用完而新块未到,速度置零并保持夹爪
+            a = np.zeros(8)
+            a[7] = self.chunk[-1, 7]
+        else:
+            a = self.chunk[self.i]
+            self.i += 1
+        if self.thread is not None:
+            self.k += 1
+        return a
+
 
 
 if __name__ == "__main__":
