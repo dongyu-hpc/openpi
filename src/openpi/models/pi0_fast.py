@@ -1277,102 +1277,175 @@ class Pi0FAST(_model.BaseModel):
 
         return output_tokens
 
+    # def _sample_actions_rtc(
+    #     self,
+    #     rng: at.KeyArrayLike,
+    #     observation: _model.Observation,
+    #     *,
+    #     max_decoding_steps: int | at.Int[at.Array, ""] = 256,
+    #     temperature: float = 0.0,
+    #     rtc_chunk_size: int = 8,
+    # ) -> _model.Actions:
+    #     """Chunked autoregressive decoding with a persistent KV cache.
+
+    #     This method still returns the complete token buffer. It does not
+    #     yet stream decoded action chunks to the robot controller.
+    #     """
+    #     if rtc_chunk_size <= 0:
+    #         raise ValueError("rtc_chunk_size must be positive")
+
+    #     (
+    #         last_logit,
+    #         kv_cache,
+    #         prefill_size,
+    #         prefill_len,
+    #         prefix_start,
+    #     ) = self._prepare_generation(
+    #         observation, max_decoding_steps
+    #     )
+
+    #     output_tokens = jnp.zeros(
+    #         (last_logit.shape[0], max_decoding_steps),
+    #         dtype=jnp.int32,
+    #     )
+
+    #     current_step = 0
+    #     all_eos = False
+
+    #     # Each outer iteration advances the same generation state.
+    #     # The prefix is not re-encoded and the KV cache is not reset.
+    #     while current_step < max_decoding_steps and not bool(all_eos):
+    #         steps_this_chunk = min(
+    #             rtc_chunk_size,
+    #             max_decoding_steps - current_step,
+    #         )
+
+    #         def chunk_step(_, carry):
+    #             (
+    #                 rng,
+    #                 last_logit,
+    #                 output_tokens,
+    #                 cache,
+    #                 all_eos,
+    #                 current_step,
+    #             ) = carry
+
+    #             return jax.lax.cond(
+    #                 all_eos,
+    #                 lambda c: c,
+    #                 lambda c: self._decode_step(
+    #                     c[0],
+    #                     c[1],
+    #                     c[2],
+    #                     c[3],
+    #                     c[5],
+    #                     prefill_size=prefill_size,
+    #                     prefill_len=prefill_len,
+    #                     prefix_start=prefix_start,
+    #                     max_decoding_steps=max_decoding_steps,
+    #                     temperature=temperature,
+    #                 ),
+    #                 carry,
+    #             )
+
+    #         (
+    #             rng,
+    #             last_logit,
+    #             output_tokens,
+    #             kv_cache,
+    #             all_eos,
+    #             current_step,
+    #         ) = jax.lax.fori_loop(
+    #             0,
+    #             steps_this_chunk,
+    #             chunk_step,
+    #             (
+    #                 rng,
+    #                 last_logit,
+    #                 output_tokens,
+    #                 kv_cache,
+    #                 jnp.asarray(all_eos),
+    #                 jnp.asarray(current_step, dtype=jnp.int32),
+    #             ),
+    #         )
+
+    #         # Synchronize at chunk boundaries so each chunk is actually
+    #         # completed before the next chunk starts.
+    #         jax.block_until_ready(output_tokens)
+    #         current_step = int(current_step)
+    #         all_eos = bool(all_eos)
+
+    #     return output_tokens
     def _sample_actions_rtc(
-        self,
-        rng: at.KeyArrayLike,
-        observation: _model.Observation,
-        *,
-        max_decoding_steps: int | at.Int[at.Array, ""] = 256,
-        temperature: float = 0.0,
-        rtc_chunk_size: int = 8,
-    ) -> _model.Actions:
-        """Chunked autoregressive decoding with a persistent KV cache.
-
-        This method still returns the complete token buffer. It does not
-        yet stream decoded action chunks to the robot controller.
-        """
-        if rtc_chunk_size <= 0:
-            raise ValueError("rtc_chunk_size must be positive")
-
-        (
-            last_logit,
-            kv_cache,
-            prefill_size,
-            prefill_len,
-            prefix_start,
-        ) = self._prepare_generation(
-            observation, max_decoding_steps
-        )
-
-        output_tokens = jnp.zeros(
-            (last_logit.shape[0], max_decoding_steps),
-            dtype=jnp.int32,
-        )
-
-        current_step = 0
-        all_eos = False
-
-        # Each outer iteration advances the same generation state.
-        # The prefix is not re-encoded and the KV cache is not reset.
-        while current_step < max_decoding_steps and not bool(all_eos):
-            steps_this_chunk = min(
-                rtc_chunk_size,
-                max_decoding_steps - current_step,
-            )
-
-            def chunk_step(_, carry):
-                (
-                    rng,
-                    last_logit,
-                    output_tokens,
-                    cache,
-                    all_eos,
-                    current_step,
-                ) = carry
-
-                return jax.lax.cond(
-                    all_eos,
-                    lambda c: c,
-                    lambda c: self._decode_step(
-                        c[0],
-                        c[1],
-                        c[2],
-                        c[3],
-                        c[5],
-                        prefill_size=prefill_size,
-                        prefill_len=prefill_len,
-                        prefix_start=prefix_start,
-                        max_decoding_steps=max_decoding_steps,
-                        temperature=temperature,
-                    ),
-                    carry,
-                )
-
+            self,
+            rng: at.KeyArrayLike,
+            observation: _model.Observation,
+            *,
+            max_decoding_steps: int = 256,
+            temperature: float = 0.0,
+            rtc_chunk_size: int = 8,
+        ) -> _model.Actions:
+            if rtc_chunk_size <= 0:
+                raise ValueError("rtc_chunk_size must be positive")
+        
             (
+                last_logit,
+                kv_cache,
+                prefill_size,
+                prefill_len,
+                prefix_start,
+            ) = self._prepare_generation(observation, max_decoding_steps)
+        
+            output_tokens = jnp.zeros(
+                (last_logit.shape[0], max_decoding_steps),
+                dtype=jnp.int32,
+            )
+        
+            initial_carry = (
                 rng,
                 last_logit,
                 output_tokens,
                 kv_cache,
-                all_eos,
-                current_step,
-            ) = jax.lax.fori_loop(
-                0,
-                steps_this_chunk,
-                chunk_step,
-                (
-                    rng,
-                    last_logit,
-                    output_tokens,
-                    kv_cache,
-                    jnp.asarray(all_eos),
-                    jnp.asarray(current_step, dtype=jnp.int32),
-                ),
+                jnp.asarray(False),
+                jnp.asarray(0, dtype=jnp.int32),
             )
-
-            # Synchronize at chunk boundaries so each chunk is actually
-            # completed before the next chunk starts.
-            jax.block_until_ready(output_tokens)
-            current_step = int(current_step)
-            all_eos = bool(all_eos)
-
-        return output_tokens
+        
+            def outer_cond(carry):
+                return (carry[5] < max_decoding_steps) & (~carry[4])
+        
+            def outer_body(carry):
+                rng, last_logit, output_tokens, cache, all_eos, current_step = carry
+        
+                steps_this_chunk = jnp.minimum(
+                    rtc_chunk_size,
+                    max_decoding_steps - current_step,
+                )
+        
+                def chunk_step(_, c):
+                    return jax.lax.cond(
+                        c[4],
+                        lambda x: x,
+                        lambda x: self._decode_step(
+                            x[0],
+                            x[1],
+                            x[2],
+                            x[3],
+                            x[5],
+                            prefill_size=prefill_size,
+                            prefill_len=prefill_len,
+                            prefix_start=prefix_start,
+                            max_decoding_steps=max_decoding_steps,
+                            temperature=temperature,
+                        ),
+                        c,
+                    )
+        
+                return jax.lax.fori_loop(
+                    0,
+                    steps_this_chunk,
+                    chunk_step,
+                    (rng, last_logit, output_tokens, cache, all_eos, current_step),
+                )
+        
+            result = jax.lax.while_loop(outer_cond, outer_body, initial_carry)
+            return result[2]

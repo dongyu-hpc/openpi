@@ -462,7 +462,8 @@ class Policy(BasePolicy):
             # implementation in the model must accept the corresponding
             # keyword arguments.
             self._sample_actions_rtc = nnx_utils.module_jit(
-                self._model.sample_actions
+                self._model.sample_actions,
+                static_argnames=("generation_mode", "rtc_chunk_size", "max_decoding_steps"),
             )
 
             self._rng = rng if rng is not None else jax.random.key(0)
